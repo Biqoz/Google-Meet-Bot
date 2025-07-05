@@ -1,4 +1,3 @@
-# import required modules
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
@@ -50,26 +49,25 @@ class JoinGoogleMeet:
     def Glogin(self):
         try:
             print("=== [DEBUG] Tentative de connexion Google...")
-            # Login Page
             self.driver.get(
                 'https://accounts.google.com/ServiceLogin?hl=en&passive=true&continue=https://www.google.com/&ec=GAZAAQ')
-        
-            # input Gmail
             self.driver.find_element(By.ID, "identifierId").send_keys(self.mail_address)
             self.driver.find_element(By.ID, "identifierNext").click()
             self.driver.implicitly_wait(10)
-        
-            # input Password
-            self.driver.find_element(By.XPATH,
-                '//*[@id="password"]/div[1]/div/div[1]/input').send_keys(self.password)
+            # Attendre le champ mot de passe par NAME
+            password_input = WebDriverWait(self.driver, 20).until(
+                EC.presence_of_element_located((By.NAME, "Passwd"))
+            )
+            password_input.send_keys(self.password)
             self.driver.implicitly_wait(10)
             self.driver.find_element(By.ID, "passwordNext").click()
             self.driver.implicitly_wait(10)    
-            # go to google home page
             self.driver.get('https://google.com/')
             self.driver.implicitly_wait(100)
             print("=== [DEBUG] Connexion Google réussie !")
         except Exception as e:
+            print("=== [DEBUG] HTML actuel ===")
+            print(self.driver.page_source)
             print(f"=== [DEBUG] Connexion Google échouée ! Erreur: {e}")
             raise
  
