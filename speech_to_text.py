@@ -1,173 +1,153 @@
-# Fichier : join_google_meet.py
-
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
-import time
+from openai import OpenAI
 import json
 import os
+import subprocess
+import tempfile
+import datetime
 from dotenv import load_dotenv
-
-from record_audio import AudioRecorder
-from speech_to_text import SpeechToText
 
 load_dotenv()
 
-class JoinGoogleMeet:
+class SpeechToText:
     def __init__(self):
-        print("=== [BOT_INIT] Initialisation...")
-        opt = Options()
-        opt.add_argument('--no-sandbox')
-        opt.add_argument('--disable-dev-shm-usage')
-        opt.add_argument('--headless=new')
-        opt.add_argument('--start-maximized')
-        opt.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
-        opt.add_argument('--disable-blink-features=AutomationControlled')
-        
-        opt.add_experimental_option("prefs", {
-            "profile.default_content_setting_values.media_stream_mic": 2,
-            "profile.default_content_setting_values.media_stream_camera": 2,
-            "profile.default_content_setting_values.geolocation": 2,
-            "profile.default_content_setting_values.notifications": 2
-        })
-        
-        print("=== [DRIVER_INIT] Lancement du driver Chrome...")
-        self.driver = webdriver.Chrome(options=opt)
-        self.driver.set_window_size(1920, 1080)
-        print("=== [DRIVER_INIT] Driver initialisé.")
+        self.client = OpenAI(
+            api_key=os.getenv("OPENAI_API_KEY")
+        )
+        self.MAX_AUDIO_SIZE_BYTES = int(os.getenv('MAX_AUDIO_SIZE_BYTES', 20 * 1024 * 1024))
+        self.GPT_MODEL = os.getenv('GPT_MODEL', 'gpt-4.1')
+        self.WHISPER_MODEL = os.getenv('WHISPER_MODEL', 'whisper-1')
 
-    def login_with_cookies(self, meet_link):
-        try:
-            print(f"=== [LOGIN] Navigation vers {meet_link}")
-            self.driver.get(meet_link)
-            time.sleep(2)
-            cookies_path = "cookies.json"
-            if not os.path.exists(cookies_path):
-                raise FileNotFoundError(f"'{cookies_path}' introuvable.")
-            with open(cookies_path, 'r') as f:
-                cookies = json.load(f)
+    def get_file_size(self, file_path):
+        return os.path.getsize(file_path)
+
+    def get_audio_duration(self, audio_file_path):
+        result = subprocess.run(['ffprobe', '-i', audio_file_path, '-show_entries', 'format=duration', '-v', 'quiet', '-of', 'csv=%s' % ("p=0")], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        return float(result.stdout)
+
+    def resize_audio_if_needed(self, audio_file_path):
+        audio_size = self.get_file_size(audio_file_path)
+        if audio_size > self.MAX_AUDIO_SIZE_BYTES:
+            current_duration = self.get_audio_duration(audio_file_path)
+            target_duration = current_duration * self.MAX_AUDIO_SIZE_BYTES / audio_size
             
-            print(f"=== [LOGIN] Injection de {len(cookies)} cookies...")
-            for cookie in cookies:
-                if 'sameSite' in cookie and cookie['sameSite'] not in ["Strict", "Lax", "None"]:
-                    del cookie['sameSite']
-                self.driver.add_cookie(cookie)
+            temp_dir = tempfile.mkdtemp()
+            print(f"Compressed audio will be stored in {temp_dir}")
             
-            print("=== [LOGIN] Rafraîchissement pour activer la session...")
-            self.driver.refresh()
-            time.sleep(5)
-            print("=== [LOGIN] Connexion réussie.")
-        except Exception as e:
-            print(f"=== [ERREUR_FATALE] Échec de la connexion par cookies : {e}")
-            raise
-
-    def get_participant_count(self):
-        """Tente de récupérer le nombre de participants. Retourne -1 si non trouvé."""
-        try:
-            # Sélecteur pour l'icône qui contient le nombre de participants
-            participant_button_xpath = "//div[contains(@aria-label, 'Participants') and @role='button']"
-            participant_element = self.driver.find_element(By.XPATH, participant_button_xpath)
-            # Le nombre est souvent dans un span à l'intérieur de ce bouton
-            count_element = participant_element.find_element(By.CSS_SELECTOR, "span.axUSLb")
-            return int(count_element.text)
-        except (NoSuchElementException, ValueError):
-            # Si l'élément n'est pas trouvé ou n'est pas un nombre, la réunion est probablement terminée ou l'interface a changé.
-            return -1
-
-    def monitor_and_record(self, audio_path):
-        """Rejoint, lance l'enregistrement et surveille la fin de la réunion."""
-        recording_process = None
-        recorder = AudioRecorder()
-        try:
-            # --- Rejoindre la réunion ---
-            join_button_xpath = "//button[.//span[contains(text(), 'Participer') or contains(text(), 'Demander')]]"
-            print("=== [MEET] Attente du bouton pour rejoindre...")
-            join_button = WebDriverWait(self.driver, 40).until(EC.element_to_be_clickable((By.XPATH, join_button_xpath)))
-            self.driver.execute_script("arguments[0].click();", join_button)
-            print("=== [MEET] Demande de participation envoyée.")
-            time.sleep(10)
-
-            # --- Démarrer l'enregistrement ---
-            recording_process = recorder.get_audio_background(audio_path)
-            if not recording_process:
-                raise Exception("Le processus d'enregistrement ffmpeg n'a pas pu démarrer.")
+            compressed_audio_path = os.path.join(temp_dir, f'compressed_audio_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}.wav')
             
-            # --- Boucle de surveillance ---
-            print("=== [MONITORING] Surveillance commencée. Vérification toutes les 60 secondes.")
-            empty_checks = 0
-            max_empty_checks = 3  # Arrêter après 3 vérifications où le bot est seul
-
-            while True:
-                time.sleep(60)
-                count = self.get_participant_count()
-
-                if count == -1:
-                    print("=== [MONITORING] Compteur de participants introuvable. La réunion est considérée comme terminée.")
-                    break
-                
-                print(f"--- [MONITORING_TICK] Participants: {count}")
-                if count <= 1:
-                    empty_checks += 1
-                    print(f"--- [MONITORING_TICK] Le bot est seul. Vérification {empty_checks}/{max_empty_checks}.")
-                    if empty_checks >= max_empty_checks:
-                        print("=== [MONITORING] Le bot est seul depuis 3 minutes. Fin de la réunion.")
-                        break
-                else:
-                    empty_checks = 0 # Réinitialiser si quelqu'un est présent
-
-        finally:
-            # --- Arrêter proprement l'enregistrement ---
-            if recording_process:
-                print("=== [AUDIO_STOP] Arrêt du processus d'enregistrement...")
-                recorder.stop_audio_background(recording_process)
+            subprocess.run(['ffmpeg', '-i', audio_file_path, '-ss', '0', '-t', str(target_duration), compressed_audio_path])
             
-            if os.path.exists(audio_path) and os.path.getsize(audio_path) > 44:
-                print(f"=== [FILE_OK] Fichier audio finalisé: {audio_path}")
-            else:
-                print(f"=== [FILE_FAIL] Le fichier audio est vide ou manquant.")
+            return compressed_audio_path
+        return audio_file_path
 
+    def transcribe_audio(self, audio_file_path):
+        with open(audio_file_path, 'rb') as audio_file:
+            transcript = self.client.audio.translations.create(
+                file=audio_file,
+                model=self.WHISPER_MODEL,
+            )
+            print("Transcribe: Done")
+            return transcript.text
 
-def main():
-    print("=== [MAIN] Script démarré. ===")
+    def abstract_summary_extraction(self, transcription):
+        response = self.client.chat.completions.create(
+            model=self.GPT_MODEL,
+            temperature=0,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a highly skilled AI trained in language comprehension and summarization. I would like you to read the following text and summarize it into a concise abstract paragraph. Aim to retain the most important points, providing a coherent and readable summary that could help a person understand the main points of the discussion without needing to read the entire text. Please avoid unnecessary details or tangential points."
+                },
+                {
+                    "role": "user",
+                    "content": transcription
+                }
+            ]
+        )
+        print("Summary: Done")
+        return response.choices[0].message.content
+
+    def key_points_extraction(self, transcription):
+        response = self.client.chat.completions.create(
+            model=self.GPT_MODEL,
+            temperature=0,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a proficient AI with a specialty in distilling information into key points. Based on the following text, identify and list the main points that were discussed or brought up. These should be the most important ideas, findings, or topics that are crucial to the essence of the discussion. Your goal is to provide a list that someone could read to quickly understand what was talked about."
+                },
+                {
+                    "role": "user",
+                    "content": transcription
+                }
+            ]
+        )
+        print("Key Points: Done")
+        return response.choices[0].message.content
+
+    def action_item_extraction(self, transcription):
+        response = self.client.chat.completions.create(
+            model=self.GPT_MODEL,
+            temperature=0,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an AI expert in analyzing conversations and extracting action items. Please review the text and identify any tasks, assignments, or actions that were agreed upon or mentioned as needing to be done. These could be tasks assigned to specific individuals, or general actions that the group has decided to take. Please list these action items clearly and concisely."
+                },
+                {
+                    "role": "user",
+                    "content": transcription
+                }
+            ]
+        )
+        print("Action Items: Done")
+        return response.choices[0].message.content
+
+    def sentiment_analysis(self, transcription):
+        response = self.client.chat.completions.create(
+            model=self.GPT_MODEL,
+            temperature=0,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "As an AI with expertise in language and emotion analysis, your task is to analyze the sentiment of the following text. Please consider the overall tone of the discussion, the emotion conveyed by the language used, and the context in which words and phrases are used. Indicate whether the sentiment is generally positive, negative, or neutral, and provide brief explanations for your analysis where possible."
+                },
+                {
+                    "role": "user",
+                    "content": transcription
+                }
+            ]
+        )
+        print("Sentiment: Done")
+        return response.choices[0].message.content
+
+    def meeting_minutes(self, transcription):
+        abstract_summary = self.abstract_summary_extraction(transcription)
+        key_points = self.key_points_extraction(transcription)
+        action_items = self.action_item_extraction(transcription)
+        sentiment = self.sentiment_analysis(transcription)
+        return {
+            'abstract_summary': abstract_summary,
+            'key_points': key_points,
+            'action_items': action_items,
+            'sentiment': sentiment
+        }
+
+    def store_in_json_file(self, data):
+        temp_dir = tempfile.mkdtemp()
+        file_path = os.path.join(temp_dir, f'meeting_data_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}.json')
+        print(f"JSON file path: {file_path}")
+        with open(file_path, 'w') as f:
+            json.dump(data, f)
+        print("JSON file created successfully.")
+
+    def transcribe(self, audio_file_path):
+        audio_file_path = self.resize_audio_if_needed(audio_file_path)
+        transcription = self.transcribe_audio(audio_file_path)
+        summary = self.meeting_minutes(transcription)
+        self.store_in_json_file(summary)
     
-    # Configuration
-    recordings_dir = "/app/recordings"
-    os.makedirs(recordings_dir, exist_ok=True)
-    timestr = time.strftime("%Y%m%d-%H%M%S")
-    audio_path = os.path.join(recordings_dir, f"recording-{timestr}.wav")
-    meet_link = os.getenv('MEET_LINK')
-
-    if not meet_link:
-        print("=== [ERREUR_FATALE] MEET_LINK n'est pas défini.")
-        return
-
-    print(f"=== [INFO] Lien Meet: {meet_link}")
-    
-    obj = None
-    try:
-        obj = JoinGoogleMeet()
-        obj.login_with_cookies(meet_link)
-        obj.monitor_and_record(audio_path)
-
-        if os.path.exists(audio_path) and os.path.getsize(audio_path) > 44:
-            print("=== [TRANSCRIPTION] Lancement de la transcription...")
-            transcriber = SpeechToText()
-            transcriber.transcribe(audio_path)
-            print("=== [TRANSCRIPTION] Tâche terminée.")
-        else:
-            print("=== [TRANSCRIPTION] Fichier audio invalide, étape ignorée.")
-        
-        print("\n=== [SUCCÈS] Le bot a terminé sa mission. ===\n")
-
-    except Exception as e:
-        print(f"=== [ERREUR_FATALE] Le script principal a échoué : {e}")
-    finally:
-        if obj and hasattr(obj, 'driver'):
-            obj.driver.quit()
-        print("=== [FIN] Fin du script. ===")
-
-if __name__ == "__main__":
-    main()
+        print(f"Abstract Summary: {summary['abstract_summary']}")
+        print(f"Key Points: {summary['key_points']}")
+        print(f"Action Items: {summary['action_items']}")
+        print(f"Sentiment: {summary['sentiment']}")
