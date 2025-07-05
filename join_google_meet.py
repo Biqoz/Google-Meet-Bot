@@ -1,33 +1,15 @@
-import sys
-import traceback
-import os
-import tempfile
-import json
-from dotenv import load_dotenv
-
-# Gestion globale des exceptions pour tout afficher dans les logs
-def global_excepthook(type, value, tb):
-    print("=== [DEBUG] Exception non gérée détectée ===")
-    traceback.print_exception(type, value, tb)
-    sys.exit(1)
-
-sys.excepthook = global_excepthook
-
-print("=== [DEBUG] Script Python importé ===")
-
-# Imports Selenium et autres modules après avoir fixé l'excepthook
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-
 import time
-
-# Modules du projet
 from record_audio import AudioRecorder
 from speech_to_text import SpeechToText
+import os
+import tempfile
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -41,23 +23,12 @@ print(f"WHISPER_MODEL: {os.getenv('WHISPER_MODEL')}")
 print(f"RECORDING_DURATION: {os.getenv('RECORDING_DURATION')}")
 print(f"MAX_AUDIO_SIZE_BYTES: {os.getenv('MAX_AUDIO_SIZE_BYTES')}")
 print(f"SAMPLE_RATE: {os.getenv('SAMPLE_RATE')}")
-print(f"COOKIES_PATH: {os.getenv('COOKIES_PATH')}")
-
-def load_cookies(driver, cookies_path):
-    print(f"=== [DEBUG] Chargement des cookies depuis {cookies_path}")
-    with open(cookies_path, 'r') as f:
-        cookies = json.load(f)
-    for cookie in cookies:
-        # Nettoyage des champs non supportés par Selenium
-        for key in ['sameSite', 'storeId', 'hostOnly', 'session']:
-            cookie.pop(key, None)
-        try:
-            driver.add_cookie(cookie)
-        except Exception as e:
-            print(f"Erreur lors de l'ajout du cookie: {e}")
 
 class JoinGoogleMeet:
-    def __init__(self, cookies_path=None):
+    def __init__(self):
+        self.mail_address = os.getenv('EMAIL_ID')
+        self.password = os.getenv('EMAIL_PASSWORD')
+        # create chrome instance
         opt = Options()
         user_data_dir = tempfile.mkdtemp()
         opt.add_argument(f"--user-data-dir={user_data_dir}")
@@ -75,30 +46,19 @@ class JoinGoogleMeet:
         print(f"=== [DEBUG] Profil Chrome utilisé: {user_data_dir}")
         self.driver = webdriver.Chrome(options=opt)
 
-        # Charger les cookies si chemin fourni
-        if cookies_path:
-            self.driver.get('https://accounts.google.com')
-            load_cookies(self.driver, cookies_path)
-            self.driver.get('https://mail.google.com')
-            print("=== [DEBUG] Cookies chargés et session Google restaurée")
-
     def Glogin(self):
-        # Si on utilise les cookies, on ne fait pas le login manuel
-        cookies_path = os.getenv('COOKIES_PATH')
-        if cookies_path:
-            print("=== [DEBUG] Utilisation des cookies, login manuel ignoré ===")
-            return
         try:
-            print("=== [DEBUG] Tentative de connexion Google (manuel)...")
+            print("=== [DEBUG] Tentative de connexion Google...")
             self.driver.get(
                 'https://accounts.google.com/ServiceLogin?hl=en&passive=true&continue=https://www.google.com/&ec=GAZAAQ')
-            self.driver.find_element(By.ID, "identifierId").send_keys(os.getenv('EMAIL_ID'))
+            self.driver.find_element(By.ID, "identifierId").send_keys(self.mail_address)
             self.driver.find_element(By.ID, "identifierNext").click()
             self.driver.implicitly_wait(10)
+            # Attendre le champ mot de passe par NAME
             password_input = WebDriverWait(self.driver, 20).until(
                 EC.presence_of_element_located((By.NAME, "Passwd"))
             )
-            password_input.send_keys(os.getenv('EMAIL_PASSWORD'))
+            password_input.send_keys(self.password)
             self.driver.implicitly_wait(10)
             self.driver.find_element(By.ID, "passwordNext").click()
             self.driver.implicitly_wait(10)    
@@ -110,37 +70,43 @@ class JoinGoogleMeet:
             print(self.driver.page_source)
             print(f"=== [DEBUG] Connexion Google échouée ! Erreur: {e}")
             raise
-
+ 
     def turnOffMicCam(self, meet_link):
         try:
             print("=== [DEBUG] Navigation vers le lien Google Meet...")
             self.driver.get(meet_link)
+            # turn off Microphone
             time.sleep(2)
             self.driver.find_element(By.CSS_SELECTOR, 'div[jscontroller="t2mBxb"][data-anchor-id="hw0c9"]').click()
             self.driver.implicitly_wait(3000)
             print("=== [DEBUG] Micro désactivé")
+        
+            # turn off camera
             time.sleep(1)
             self.driver.find_element(By.CSS_SELECTOR, 'div[jscontroller="bwqwSd"][data-anchor-id="psRWwc"]').click()
             self.driver.implicitly_wait(3000)
             print("=== [DEBUG] Caméra désactivée")
         except Exception as e:
             print(f"=== [DEBUG] Erreur lors de la désactivation micro/caméra : {e}")
-
+ 
     def checkIfJoined(self):
         try:
+            # Wait for the join button to appear
             join_button = WebDriverWait(self.driver, 60).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, 'div.uArJ5e.UQuaGc.Y5sE8d.uyXBBb.xKiqt'))
             )
             print("=== [DEBUG] Réunion rejointe")
         except (TimeoutException, NoSuchElementException):
             print("=== [DEBUG] Réunion NON rejointe")
-
+    
     def AskToJoin(self, audio_path, duration):
         try:
             time.sleep(5)
             self.driver.implicitly_wait(2000)
             self.driver.find_element(By.CSS_SELECTOR, 'button[jsname="Qx7uuf"]').click()
             print("=== [DEBUG] Demande de rejoindre la réunion envoyée")
+            # checkIfJoined()
+            # Ask to join and join now buttons have same xpaths
             AudioRecorder().get_audio(audio_path, duration)
         except Exception as e:
             print(f"=== [DEBUG] Erreur lors de la demande de rejoindre : {e}")
@@ -148,19 +114,17 @@ class JoinGoogleMeet:
 def main():
     temp_dir = tempfile.mkdtemp()
     audio_path = os.path.join(temp_dir, "output.wav")
+    # Get configuration from environment variables
     meet_link = os.getenv('MEET_LINK')
     duration = int(os.getenv('RECORDING_DURATION', 60))
-    cookies_path = os.getenv('COOKIES_PATH')
-    obj = JoinGoogleMeet(cookies_path=cookies_path)
+    
+    obj = JoinGoogleMeet()
     obj.Glogin()
     obj.turnOffMicCam(meet_link)
     obj.AskToJoin(audio_path, duration)
     SpeechToText().transcribe(audio_path)
 
+#call the main function
 if __name__ == "__main__":
     print("=== [DEBUG] Script Python lancé ===")
-    try:
-        main()
-    except Exception as e:
-        print(f"=== [DEBUG] Exception au démarrage : {e}")
-        traceback.print_exc()
+    main()
