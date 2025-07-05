@@ -1,27 +1,56 @@
-import json
+import sys
+import traceback
 import os
 import tempfile
+import json
+from dotenv import load_dotenv
+
+# Gestion globale des exceptions pour tout afficher dans les logs
+def global_excepthook(type, value, tb):
+    print("=== [DEBUG] Exception non gérée détectée ===")
+    traceback.print_exception(type, value, tb)
+    sys.exit(1)
+
+sys.excepthook = global_excepthook
+
+print("=== [DEBUG] Script Python importé ===")
+
+# Imports Selenium et autres modules après avoir fixé l'excepthook
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from dotenv import load_dotenv
+
 import time
+
+# Modules du projet
 from record_audio import AudioRecorder
 from speech_to_text import SpeechToText
 
 load_dotenv()
 
+# DEBUG : Afficher toutes les variables d'environnement utiles
+print("=== [DEBUG] Démarrage du bot Google Meet ===")
+print(f"EMAIL_ID: {os.getenv('EMAIL_ID')}")
+print(f"MEET_LINK: {os.getenv('MEET_LINK')}")
+print(f"OPENAI_API_KEY présent: {'Oui' if os.getenv('OPENAI_API_KEY') else 'Non'}")
+print(f"GPT_MODEL: {os.getenv('GPT_MODEL')}")
+print(f"WHISPER_MODEL: {os.getenv('WHISPER_MODEL')}")
+print(f"RECORDING_DURATION: {os.getenv('RECORDING_DURATION')}")
+print(f"MAX_AUDIO_SIZE_BYTES: {os.getenv('MAX_AUDIO_SIZE_BYTES')}")
+print(f"SAMPLE_RATE: {os.getenv('SAMPLE_RATE')}")
+print(f"COOKIES_PATH: {os.getenv('COOKIES_PATH')}")
+
 def load_cookies(driver, cookies_path):
+    print(f"=== [DEBUG] Chargement des cookies depuis {cookies_path}")
     with open(cookies_path, 'r') as f:
         cookies = json.load(f)
     for cookie in cookies:
-        cookie.pop('sameSite', None)
-        cookie.pop('storeId', None)
-        cookie.pop('hostOnly', None)
-        cookie.pop('session', None)
+        # Nettoyage des champs non supportés par Selenium
+        for key in ['sameSite', 'storeId', 'hostOnly', 'session']:
+            cookie.pop(key, None)
         try:
             driver.add_cookie(cookie)
         except Exception as e:
@@ -29,8 +58,6 @@ def load_cookies(driver, cookies_path):
 
 class JoinGoogleMeet:
     def __init__(self, cookies_path=None):
-        self.mail_address = os.getenv('EMAIL_ID')
-        self.password = os.getenv('EMAIL_PASSWORD')
         opt = Options()
         user_data_dir = tempfile.mkdtemp()
         opt.add_argument(f"--user-data-dir={user_data_dir}")
@@ -50,7 +77,6 @@ class JoinGoogleMeet:
 
         # Charger les cookies si chemin fourni
         if cookies_path:
-            print(f"=== [DEBUG] Chargement des cookies depuis {cookies_path}")
             self.driver.get('https://accounts.google.com')
             load_cookies(self.driver, cookies_path)
             self.driver.get('https://mail.google.com')
@@ -58,17 +84,21 @@ class JoinGoogleMeet:
 
     def Glogin(self):
         # Si on utilise les cookies, on ne fait pas le login manuel
+        cookies_path = os.getenv('COOKIES_PATH')
+        if cookies_path:
+            print("=== [DEBUG] Utilisation des cookies, login manuel ignoré ===")
+            return
         try:
             print("=== [DEBUG] Tentative de connexion Google (manuel)...")
             self.driver.get(
                 'https://accounts.google.com/ServiceLogin?hl=en&passive=true&continue=https://www.google.com/&ec=GAZAAQ')
-            self.driver.find_element(By.ID, "identifierId").send_keys(self.mail_address)
+            self.driver.find_element(By.ID, "identifierId").send_keys(os.getenv('EMAIL_ID'))
             self.driver.find_element(By.ID, "identifierNext").click()
             self.driver.implicitly_wait(10)
             password_input = WebDriverWait(self.driver, 20).until(
                 EC.presence_of_element_located((By.NAME, "Passwd"))
             )
-            password_input.send_keys(self.password)
+            password_input.send_keys(os.getenv('EMAIL_PASSWORD'))
             self.driver.implicitly_wait(10)
             self.driver.find_element(By.ID, "passwordNext").click()
             self.driver.implicitly_wait(10)    
@@ -120,20 +150,17 @@ def main():
     audio_path = os.path.join(temp_dir, "output.wav")
     meet_link = os.getenv('MEET_LINK')
     duration = int(os.getenv('RECORDING_DURATION', 60))
-    cookies_path = os.getenv('COOKIES_PATH')  # Variable d'environnement à définir dans Coolify
-
+    cookies_path = os.getenv('COOKIES_PATH')
     obj = JoinGoogleMeet(cookies_path=cookies_path)
-
-    # Si les cookies sont chargés, on saute le login manuel
-    if cookies_path:
-        print("=== [DEBUG] Utilisation des cookies, login manuel ignoré ===")
-    else:
-        obj.Glogin()
-
+    obj.Glogin()
     obj.turnOffMicCam(meet_link)
     obj.AskToJoin(audio_path, duration)
     SpeechToText().transcribe(audio_path)
 
 if __name__ == "__main__":
     print("=== [DEBUG] Script Python lancé ===")
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"=== [DEBUG] Exception au démarrage : {e}")
+        traceback.print_exc()
