@@ -1,10 +1,10 @@
 FROM python:3.10-slim
 
 RUN apt-get update && apt-get install -y \
-    wget unzip xvfb libxi6 libgconf-2-4 libnss3 libxss1 libappindicator1 \
-    libindicator7 libasound2 libatk-bridge2.0-0 libgtk-3-0 fonts-liberation \
-    libgbm1 libu2f-udev libvulkan1 pulseaudio portaudio19-dev libportaudio2 \
-    libportaudiocpp0 ffmpeg --no-install-recommends && \
+    wget unzip xvfb libxi6 libgconf-2-4 libnss3 libxss1 \
+    libasound2 libatk-bridge2.0-0 libgtk-3-0 fonts-liberation \
+    libgbm1 libu2f-udev libvulkan1 pulseaudio portaudio19-dev \
+    libportaudio2 libportaudiocpp0 ffmpeg --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
 RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - && \
