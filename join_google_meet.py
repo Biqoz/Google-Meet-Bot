@@ -3,7 +3,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementClickInterceptedException
 import time
 import json
 import os
@@ -68,86 +68,76 @@ class JoinGoogleMeet:
             print(self.driver.page_source)
             raise
 
-    # NOUVELLE FONCTION UTILITAIRE POUR FERMER LES POPUPS
-    def dismiss_any_modal_dialog(self):
-        """Cherche et ferme n'importe quelle boîte de dialogue modale qui pourrait apparaître."""
-        try:
-            # Sélecteur robuste pour le bouton "Ignorer" dans un dialogue
-            dismiss_button_xpath = "//div[@role='alertdialog']//button"
-            dismiss_button = WebDriverWait(self.driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, dismiss_button_xpath))
-            )
-            print("=== [INFO] Boîte de dialogue modale détectée. Fermeture...")
-            self.driver.execute_script("arguments[0].click();", dismiss_button)
-            print("=== [INFO] Boîte de dialogue fermée.")
-            time.sleep(2)  # Attendre que l'animation de fermeture se termine
-        except TimeoutException:
-            # C'est le cas normal si aucun popup n'apparaît.
-            print("=== [INFO] Aucune boîte de dialogue modale n'est apparue.")
-        except Exception as e:
-            print(f"=== [AVERTISSEMENT] Impossible de fermer la boîte de dialogue : {e}")
-
-
-    # VERSION AMÉLIORÉE DE turnOffMicCam
+    # VERSION FINALE DE turnOffMicCam - PLUS ROBUSTE
     def turnOffMicCam(self):
+        print("=== [DEBUG] Initialisation de la désactivation micro/caméra...")
+        
+        # On attend que la page soit interactive en cherchant le bouton pour participer
         try:
-            print("=== [DEBUG] Attente et désactivation micro/caméra...")
-            
-            # Attendre que les boutons soient globalement présents
             WebDriverWait(self.driver, 30).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div.U26fgb"))
+                EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Participer')]"))
             )
-            time.sleep(3) # Laisse le temps à l'interface de se stabiliser
+        except TimeoutException:
+            print("=== [ERREUR] La page de pré-connexion ne s'est pas chargée en 30 secondes.")
+            return
 
-            # On vérifie une première fois s'il y a des popups
-            self.dismiss_any_modal_dialog()
+        # On boucle jusqu'à 5 fois pour s'assurer que tout est bien cliqué
+        for i in range(5):
+            # On cherche tous les pop-ups possibles et on les ferme
+            try:
+                dialog_buttons = self.driver.find_elements(By.XPATH, "//div[@role='alertdialog']//button")
+                if dialog_buttons:
+                    print(f"--- [INFO] Tentative {i+1}: Boîte de dialogue détectée, fermeture...")
+                    for button in dialog_buttons:
+                        try:
+                            self.driver.execute_script("arguments[0].click();", button)
+                        except:
+                            pass # On ignore les erreurs si un bouton disparaît
+                    time.sleep(1)
+            except:
+                pass
 
-            # --- Désactiver le Micro ---
-            # Sélecteur ciblant le bouton du micro, quel que soit son état (activé/désactivé)
-            mic_button = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, "//button[@data-promo-anchor-id='Wj0DQc']"))
-            )
-            print("=== [DEBUG] Tentative de désactivation du micro...")
-            self.driver.execute_script("arguments[0].click();", mic_button)
-            print("=== [DEBUG] Micro désactivé.")
+            try:
+                # On ré-identifie les boutons à chaque boucle
+                all_buttons = self.driver.find_elements(By.CSS_SELECTOR, "div.U26fgb")
+                mic_button, cam_button = all_buttons[0], all_buttons[1]
+
+                # Vérifier si le micro est déjà désactivé (l'icône change)
+                if "mic_off" not in mic_button.find_element(By.TAG_NAME, "i").text:
+                    print(f"--- [INFO] Tentative {i+1}: Désactivation du micro...")
+                    self.driver.execute_script("arguments[0].click();", mic_button)
+                    time.sleep(0.5)
+                
+                # Vérifier si la caméra est déjà désactivée
+                if "videocam_off" not in cam_button.find_element(By.TAG_NAME, "i").text:
+                    print(f"--- [INFO] Tentative {i+1}: Désactivation de la caméra...")
+                    self.driver.execute_script("arguments[0].click();", cam_button)
+                    time.sleep(0.5)
+
+                # Si les deux sont bien désactivés, on sort de la boucle
+                if "mic_off" in all_buttons[0].find_element(By.TAG_NAME, "i").text and \
+                   "videocam_off" in all_buttons[1].find_element(By.TAG_NAME, "i").text:
+                    print("=== [DEBUG] Micro et Caméra désactivés avec succès.")
+                    return # C'est gagné !
             
-            # On vérifie A NOUVEAU, juste au cas où le premier clic a déclenché un popup
-            self.dismiss_any_modal_dialog()
+            except Exception as e:
+                print(f"--- [AVERTISSEMENT] Erreur dans la boucle de la tentative {i+1}: {e.__class__.__name__}")
+        
+        print("=== [ERREUR GRAVE] Échec de la désactivation du micro/caméra après plusieurs tentatives.")
 
-            # --- Désactiver la Caméra ---
-            # Sélecteur ciblant le bouton de la caméra
-            cam_button = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, "//button[@data-promo-anchor-id='yhZxwc']"))
-            )
-            print("=== [DEBUG] Tentative de désactivation de la caméra...")
-            self.driver.execute_script("arguments[0].click();", cam_button)
-            print("=== [DEBUG] Caméra désactivée.")
-            
-            # Ultime vérification
-            self.dismiss_any_modal_dialog()
 
-        except Exception as e:
-            print(f"=== [ERREUR GRAVE] Échec lors de la désactivation micro/caméra : {e}")
-            print("=== [DEBUG] HTML au moment de l'erreur turnOffMicCam ===")
-            print(self.driver.page_source)
-            # On continue, car ce n'est pas forcément bloquant pour la suite
-    
-    # ... le reste du code (AskToJoin, main, etc.) ne change pas ...
     def AskToJoin(self, audio_path, duration):
+        # ... (cette fonction reste la même) ...
         try:
             time.sleep(5)
-            # Utilisons un sélecteur plus fiable qui cherche le bouton par son texte
             join_button_xpath = "//button[.//span[contains(text(), 'Participer') or contains(text(), 'Demander')]]"
             join_button = WebDriverWait(self.driver, 40).until(
                 EC.element_to_be_clickable((By.XPATH, join_button_xpath))
             )
             join_button.click()
-            
             print("=== [DEBUG] Demande de rejoindre la réunion envoyée ou réunion rejointe.")
-            
-            time.sleep(10) # Attendre d'être bien dans la salle
-            
-            #AudioRecorder().get_audio(audio_path, duration) # Commenté pour des tests plus rapides
+            time.sleep(10)
+            #AudioRecorder().get_audio(audio_path, duration)
         except Exception as e:
             print(f"=== [DEBUG] Erreur lors de la demande pour rejoindre : {e}")
             print("=== [DEBUG] HTML au moment de l'erreur AskToJoin ===")
@@ -164,7 +154,7 @@ def main():
     obj.load_cookies_and_go_to_meet(meet_link)
     obj.turnOffMicCam()
     obj.AskToJoin(audio_path, duration)
-    # SpeechToText().transcribe(audio_path) # commenté pour le moment
+    # SpeechToText().transcribe(audio_path)
 
 if __name__ == "__main__":
     print("=== [DEBUG] Script Python lancé ===")
