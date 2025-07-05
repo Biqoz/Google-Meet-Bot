@@ -31,10 +31,11 @@ class JoinGoogleMeet:
         self.password = os.getenv('EMAIL_PASSWORD')
         # create chrome instance
         opt = Options()
-        # PATCH: always use a unique Chrome user data dir (fixes Docker/Coolify bug)
         user_data_dir = tempfile.mkdtemp()
         opt.add_argument(f"--user-data-dir={user_data_dir}")
-        print(f"=== [DEBUG] Profil Chrome utilisé: {user_data_dir}")
+        opt.add_argument('--no-sandbox')
+        opt.add_argument('--disable-dev-shm-usage')
+        opt.add_argument('--headless=new')
         opt.add_argument('--disable-blink-features=AutomationControlled')
         opt.add_argument('--start-maximized')
         opt.add_experimental_option("prefs", {
@@ -43,6 +44,7 @@ class JoinGoogleMeet:
             "profile.default_content_setting_values.geolocation": 0,
             "profile.default_content_setting_values.notifications": 1
         })
+        print(f"=== [DEBUG] Profil Chrome utilisé: {user_data_dir}")
         self.driver = webdriver.Chrome(options=opt)
 
     def Glogin(self):
