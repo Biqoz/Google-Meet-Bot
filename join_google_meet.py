@@ -5,20 +5,14 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import time
-from record_audio import AudioRecorder
-from speech_to_text import SpeechToText
+import json
 import os
-import json # <--- IMPORTER LA LIBRAIRIE JSON
 import tempfile
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ... (vos print de DEBUG restent les mêmes) ...
-print("=== [DEBUG] Démarrage du bot Google Meet ===")
-print(f"EMAIL_ID: {os.getenv('EMAIL_ID')}")
-print(f"MEET_LINK: {os.getenv('MEET_LINK')}")
-# etc.
+# ... (les prints de debug restent les mêmes) ...
 
 class JoinGoogleMeet:
     def __init__(self):
@@ -29,7 +23,6 @@ class JoinGoogleMeet:
         opt.add_argument('--no-sandbox')
         opt.add_argument('--disable-dev-shm-usage')
         opt.add_argument('--headless=new')
-        # On peut essayer d'ajouter un User-Agent pour paraître plus humain
         opt.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
         opt.add_argument('--disable-blink-features=AutomationControlled')
         opt.add_argument('--start-maximized')
@@ -42,16 +35,17 @@ class JoinGoogleMeet:
         print(f"=== [DEBUG] Profil Chrome utilisé: {user_data_dir}")
         self.driver = webdriver.Chrome(options=opt)
 
-    # L'ANCIENNE FONCTION Glogin n'est plus utile
-    # def Glogin(self): ...
-
-    # NOUVELLE FONCTION POUR CHARGER LES COOKIES
+    # NOUVELLE VERSION DE LA FONCTION - PLUS ROBUSTE
     def load_cookies_and_go_to_meet(self, meet_link):
         try:
             print("=== [DEBUG] Tentative de connexion via les cookies...")
-            # 1. Aller sur le domaine principal pour pouvoir charger les cookies
-            self.driver.get("https://google.com")
             
+            # 1. ALLER D'ABORD sur le lien du Meet.
+            # C'est la page la plus pertinente pour accepter les cookies de connexion.
+            print(f"=== [DEBUG] Navigation vers le lien Google Meet : {meet_link}")
+            self.driver.get(meet_link)
+            self.driver.implicitly_wait(5) # Laisse le temps à la page de rediriger si besoin
+
             # 2. Charger les cookies depuis le fichier
             cookies_path = "cookies.json"
             if not os.path.exists(cookies_path):
@@ -61,75 +55,74 @@ class JoinGoogleMeet:
             with open(cookies_path, 'r') as f:
                 cookies = json.load(f)
 
+            print(f"=== [DEBUG] Chargement de {len(cookies)} cookies...")
             for cookie in cookies:
-                # Certains cookies peuvent ne pas avoir 'sameSite', ce qui peut causer une erreur
-                if 'sameSite' not in cookie:
-                    cookie['sameSite'] = 'None' # ou 'Strict' ou 'Lax' selon le cookie
-                self.driver.add_cookie(cookie)
+                # Ajout d'une gestion plus fine des erreurs de cookies
+                if 'sameSite' in cookie and cookie['sameSite'] not in ('Strict', 'Lax', 'None'):
+                    cookie['sameSite'] = 'Lax' # Valeur par défaut sûre
+                try:
+                    self.driver.add_cookie(cookie)
+                except Exception as cookie_error:
+                    # On ignore les cookies qui pourraient poser problème
+                    print(f"--- [INFO] Impossible de charger un cookie : {cookie.get('name')} - Erreur: {cookie_error}")
             
-            print("=== [DEBUG] Cookies chargés avec succès.")
+            print("=== [DEBUG] Cookies chargés.")
             
-            # 3. Maintenant, aller directement au lien du Meet
-            print("=== [DEBUG] Navigation vers le lien Google Meet...")
-            self.driver.get(meet_link)
+            # 3. Rafraîchir la page pour que la session soit prise en compte
+            print("=== [DEBUG] Rafraîchissement de la page pour appliquer la session.")
+            self.driver.refresh()
             self.driver.implicitly_wait(10)
-            print("=== [DEBUG] Page Meet atteinte.")
+            print("=== [DEBUG] Page Meet atteinte et connectée.")
             
         except Exception as e:
-            print(f"=== [DEBUG] Erreur lors du chargement des cookies ou de la navigation : {e}")
+            print(f"=== [ERREUR] Erreur lors du chargement des cookies ou de la navigation.")
+            print(f"Type d'erreur : {type(e)}") # Affiche le type d'exception
+            print(f"Message d'erreur : {e}")     # Affiche le message de l'exception
             print("=== [DEBUG] HTML actuel ===")
             print(self.driver.page_source)
             raise
- 
-    def turnOffMicCam(self): # Note : le paramètre meet_link n'est plus nécessaire ici
-        try:
-            print("=== [DEBUG] Attente de la page de pré-connexion...")
-            time.sleep(5) # Laisser un peu de temps à la page pour se charger complètement
 
-            # Les sélecteurs pour le micro et la caméra peuvent changer. Il faudra peut-être les ajuster.
-            # Voici des sélecteurs plus robustes basés sur les attributs aria-label ou jsname
+    def turnOffMicCam(self):
+        try:
+            print("=== [DEBUG] Attente et désactivation micro/caméra...")
+            time.sleep(5) 
             
-            # Désactiver le micro
-            print("=== [DEBUG] Tentative de désactivation du micro...")
-            mic_button = WebDriverWait(self.driver, 30).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, 'div[data-promo-anchor-id="Wj0DQc"] button[aria-label*="microphone"]'))
+            # Utilisons des WebDriverWait pour plus de fiabilité
+            mic_button = WebDriverWait(self.driver, 40).until(
+                EC.element_to_be_clickable((By.XPATH, "//div[@role='button' and contains(@aria-label, 'micro')]"))
             )
             mic_button.click()
             print("=== [DEBUG] Micro désactivé")
             
-            # Désactiver la caméra
             time.sleep(2)
-            print("=== [DEBUG] Tentative de désactivation de la caméra...")
-            cam_button = WebDriverWait(self.driver, 30).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, 'div[data-promo-anchor-id="Wj0DQc"] button[aria-label*="camera"]'))
+            cam_button = WebDriverWait(self.driver, 40).until(
+                EC.element_to_be_clickable((By.XPATH, "//div[@role='button' and contains(@aria-label, 'caméra')]"))
             )
             cam_button.click()
             print("=== [DEBUG] Caméra désactivée")
 
         except Exception as e:
             print(f"=== [DEBUG] Erreur lors de la désactivation micro/caméra : {e}")
-            print("=== [DEBUG] HTML actuel lors de l'erreur turnOffMicCam ===")
+            print("=== [DEBUG] HTML au moment de l'erreur turnOffMicCam ===")
             print(self.driver.page_source)
-            # Ne pas relancer l'erreur ici, on peut peut-être continuer même si ça échoue
+            # On continue même si ça échoue, ce n'est pas bloquant
  
     def AskToJoin(self, audio_path, duration):
         try:
             time.sleep(5)
-            # Le bouton "Demander à participer" ou "Participer"
-            join_button = WebDriverWait(self.driver, 30).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[jsname="Qx7uuf"]'))
+            join_button = WebDriverWait(self.driver, 40).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Participer')] | //button[contains(., 'Demander')]"))
             )
             join_button.click()
             
             print("=== [DEBUG] Demande de rejoindre la réunion envoyée ou réunion rejointe.")
             
-            # Attendre un peu pour être sûr d'être dans la réunion avant d'enregistrer
-            time.sleep(10)
+            time.sleep(10) # Attendre d'être bien dans la salle
             
             AudioRecorder().get_audio(audio_path, duration)
         except Exception as e:
             print(f"=== [DEBUG] Erreur lors de la demande pour rejoindre : {e}")
-            print("=== [DEBUG] HTML actuel lors de l'erreur AskToJoin ===")
+            print("=== [DEBUG] HTML au moment de l'erreur AskToJoin ===")
             print(self.driver.page_source)
 
 def main():
@@ -140,10 +133,9 @@ def main():
     
     obj = JoinGoogleMeet()
     
-    # MODIFICATION : On n'appelle plus Glogin(), mais la nouvelle fonction
     obj.load_cookies_and_go_to_meet(meet_link)
     
-    obj.turnOffMicCam() # Plus besoin de passer le lien ici
+    obj.turnOffMicCam()
     obj.AskToJoin(audio_path, duration)
     SpeechToText().transcribe(audio_path)
 
