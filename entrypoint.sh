@@ -1,15 +1,12 @@
 #!/bin/sh
 
-# Lancer PulseAudio en arrière-plan
 echo "=== [ENTRYPOINT] Lancement de PulseAudio... ==="
 pulseaudio --start --log-target=stderr
 
-# Attendre un court instant que PulseAudio soit prêt
-sleep 2
+sleep 2 # Petite pause pour s'assurer que PulseAudio est démarré
 
-# Lancer le script Python avec Xvfb
+echo "=== [ENTRYPOINT] Lancement du script Python via xvfb-run avec l'option -u ==="
 # L'option -u est la clé pour avoir les logs en temps réel !
-echo "=== [ENTRYPOINT] Lancement du script Python via xvfb-run... ==="
 xvfb-run -a python -u join_google_meet.py
 
 echo "=== [ENTRYPOINT] Le script Python est terminé. ==="
