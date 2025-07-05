@@ -14,7 +14,7 @@ class SpeechToText:
             api_key=os.getenv("OPENAI_API_KEY")
         )
         self.MAX_AUDIO_SIZE_BYTES = int(os.getenv('MAX_AUDIO_SIZE_BYTES', 20 * 1024 * 1024))
-        self.GPT_MODEL = os.getenv('GPT_MODEL', 'gpt-4')
+        self.GPT_MODEL = os.getenv('GPT_MODEL', 'gpt-4.1')
         self.WHISPER_MODEL = os.getenv('WHISPER_MODEL', 'whisper-1')
 
     def get_file_size(self, file_path):
