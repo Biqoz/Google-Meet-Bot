@@ -1,5 +1,4 @@
 # Fichier : join_google_meet.py
-
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
@@ -10,15 +9,13 @@ import time
 import json
 import os
 from dotenv import load_dotenv
-
-# Assurez-vous que ces fichiers existent et sont dans le même dossier
 from record_audio import AudioRecorder
 from speech_to_text import SpeechToText
 
 load_dotenv()
 
 class JoinGoogleMeet:
-    # __init__ et login_with_cookies ne changent pas
+    # ... (le code de la classe est celui de ma réponse précédente, il est correct) ...
     def __init__(self):
         opt = Options()
         opt.add_argument('--no-sandbox')
@@ -75,14 +72,11 @@ class JoinGoogleMeet:
             print("=== [INFO] Attente de 10 secondes pour la stabilisation de la connexion...")
             time.sleep(10)
             
-            # --- SECTION DE DÉBOGAGE AUDIO CRITIQUE ---
             print("=== [DEBUG] Appel de AudioRecorder().get_audio() maintenant...")
             recorder = AudioRecorder()
             recorder.get_audio(audio_path, duration)
             print("=== [DEBUG] L'appel à AudioRecorder().get_audio() est terminé.")
-            # -------------------------------------------
 
-            # Vérifier si le fichier a bien été créé
             if os.path.exists(audio_path):
                 print(f"=== [SUCCÈS] Fichier audio créé avec succès à l'emplacement : {audio_path}")
                 print(f"=== [DEBUG] Taille du fichier : {os.path.getsize(audio_path)} octets")
@@ -97,14 +91,13 @@ class JoinGoogleMeet:
 def main():
     print("=== [INFO] Démarrage de la fonction main() ===")
     
-    # Configuration des chemins
     recordings_dir = "/app/recordings"
     os.makedirs(recordings_dir, exist_ok=True)
     timestr = time.strftime("%Y%m%d-%H%M%S")
     audio_path = os.path.join(recordings_dir, f"recording-{timestr}.wav")
     
     meet_link = os.getenv('MEET_LINK')
-    duration = int(os.getenv('RECORDING_DURATION', 60)) # Durée de test courte
+    duration = int(os.getenv('RECORDING_DURATION', 60))
 
     if not meet_link:
         print("=== [ERREUR FATALE] Variable d'environnement MEET_LINK manquante.")
@@ -121,7 +114,7 @@ def main():
         obj.login_with_cookies(meet_link)
         obj.join_and_record(audio_path, duration)
 
-        if os.path.exists(audio_path) and os.path.getsize(audio_path) > 44: # Un fichier WAV vide fait ~44 octets
+        if os.path.exists(audio_path) and os.path.getsize(audio_path) > 44:
             print("=== [INFO] Lancement de la transcription...")
             transcriber = SpeechToText()
             transcriber.transcribe(audio_path)
@@ -130,7 +123,6 @@ def main():
             print("=== [AVERTISSEMENT] Fichier audio vide ou manquant, la transcription est ignorée.")
         
         print("=== [SUCCÈS] Le bot a terminé toutes ses tâches.")
-
     except Exception as e:
         print(f"=== [ERREUR] Une erreur non gérée est survenue : {e}")
     finally:
