@@ -9,30 +9,29 @@ from selenium.common.exceptions import TimeoutException
 import time
 import json
 import os
-import tempfile
-
-# Ces imports sont nécessaires pour l'enregistrement et la transcription
-from record_audio import AudioRecorder
-from speech_to_text import SpeechToText
 from dotenv import load_dotenv
 
-# Charger les variables d'environnement (depuis Coolify)
+# Ces imports sont nécessaires pour l'enregistrement et la transcription
+# Assurez-vous que les fichiers record_audio.py et speech_to_text.py sont présents
+from record_audio import AudioRecorder
+from speech_to_text import SpeechToText
+
+# Charger les variables d'environnement (depuis Coolify ou .env)
 load_dotenv()
 
 class JoinGoogleMeet:
     def __init__(self):
+        # --- Configuration de Chrome pour un serveur (Coolify/Docker) ---
         opt = Options()
-        self.temp_dir = tempfile.mkdtemp() # On stocke le répertoire temporaire
-        print(f"=== [DEBUG] Répertoire temporaire créé : {self.temp_dir}")
-        opt.add_argument(f"--user-data-dir={self.temp_dir}")
         opt.add_argument('--no-sandbox')
         opt.add_argument('--disable-dev-shm-usage')
         opt.add_argument('--headless=new')
+        opt.add_argument('--start-maximized')
         opt.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
         opt.add_argument('--disable-blink-features=AutomationControlled')
-        opt.add_argument('--start-maximized')
         
-        # On dit à Chrome de refuser automatiquement les demandes de micro et caméra.
+        # --- STRATÉGIE CLÉ : Bloquer les périphériques au niveau du navigateur ---
+        # Cela évite tous les pop-ups de demande d'autorisation.
         # 1 = Autoriser, 2 = Bloquer
         opt.add_experimental_option("prefs", {
             "profile.default_content_setting_values.media_stream_mic": 2,
@@ -63,11 +62,7 @@ class JoinGoogleMeet:
             for cookie in cookies:
                 if 'sameSite' in cookie and cookie['sameSite'] not in ["Strict", "Lax", "None"]:
                     del cookie['sameSite']
-                
-                try:
-                    self.driver.add_cookie(cookie)
-                except Exception as cookie_error:
-                    print(f"--- [AVERTISSEMENT] Impossible de charger le cookie '{cookie.get('name')}': {cookie_error}")
+                self.driver.add_cookie(cookie)
 
             print("=== [DEBUG] Cookies chargés. Rafraîchissement de la page...")
             self.driver.refresh()
@@ -82,9 +77,7 @@ class JoinGoogleMeet:
     def join_and_record(self, audio_path, duration):
         """Rejoint la réunion et lance l'enregistrement audio."""
         try:
-            # Sélecteur robuste pour "Participer" ou "Demander à participer"
             join_button_xpath = "//button[.//span[contains(text(), 'Participer') or contains(text(), 'Demander')]]"
-            
             print("=== [DEBUG] Attente du bouton pour rejoindre la réunion...")
             join_button = WebDriverWait(self.driver, 40).until(
                 EC.element_to_be_clickable((By.XPATH, join_button_xpath))
@@ -97,10 +90,10 @@ class JoinGoogleMeet:
             print("=== [INFO] Attente de 10 secondes pour la stabilisation de la connexion...")
             time.sleep(10)
             
-            print("=== [INFO] Lancement de l'enregistrement audio...")
+            print("=== [INFO] Enregistrement audio démarré...")
             recorder = AudioRecorder()
             recorder.get_audio(audio_path, duration)
-            print(f"=== [INFO] Enregistrement audio terminé. Fichier sauvegardé dans {audio_path}")
+            print(f"=== [INFO] Enregistrement audio terminé. Fichier sauvegardé ici : {audio_path}")
 
         except Exception as e:
             print(f"=== [ERREUR FATALE] Échec pour rejoindre ou enregistrer : {e}")
@@ -108,9 +101,25 @@ class JoinGoogleMeet:
             raise
 
 def main():
-    # Définition des chemins et variables
-    temp_dir = tempfile.mkdtemp()
-    audio_path = os.path.join(temp_dir, "output.wav")
+    # --- ÉTAPE 0 : VÉRIFICATION DES VARIABLES D'ENVIRONNEMENT ---
+    print("=== [DEBUG] Vérification des variables d'environnement ===")
+    print(f"EMAIL_ID: {os.getenv('EMAIL_ID')}")
+    print(f"MEET_LINK: {os.getenv('MEET_LINK')}")
+    print(f"OPENAI_API_KEY présent: {'Oui' if os.getenv('OPENAI_API_KEY') else 'Non'}")
+    print(f"GPT_MODEL: {os.getenv('GPT_MODEL')}")
+    print(f"WHISPER_MODEL: {os.getenv('WHISPER_MODEL')}")
+    print(f"RECORDING_DURATION: {os.getenv('RECORDING_DURATION')}")
+    print("-------------------------------------------------------")
+
+    # --- Étape de Configuration des Fichiers ---
+    # Le chemin où seront sauvegardés les enregistrements à l'intérieur du conteneur
+    recordings_dir = "/app/recordings"
+    os.makedirs(recordings_dir, exist_ok=True) # On crée le dossier s'il n'existe pas
+    
+    # On crée un nom de fichier unique basé sur la date et l'heure
+    timestr = time.strftime("%Y%m%d-%H%M%S")
+    audio_path = os.path.join(recordings_dir, f"recording-{timestr}.wav")
+    
     meet_link = os.getenv('MEET_LINK')
     duration = int(os.getenv('RECORDING_DURATION', 18000))
 
@@ -119,14 +128,11 @@ def main():
         return
 
     print("=== [INFO] Lancement du bot Google Meet ===")
-    print(f"=== [INFO] Lien de la réunion : {meet_link}")
-    print(f"=== [INFO] Durée d'enregistrement : {duration} secondes")
-    print(f"=== [INFO] Le fichier audio sera sauvegardé dans : {audio_path}")
+    print(f"=== [INFO] Le fichier audio sera sauvegardé ici : {audio_path}")
     
     obj = None
     try:
         obj = JoinGoogleMeet()
-        
         obj.login_with_cookies(meet_link)
         obj.join_and_record(audio_path, duration)
 
