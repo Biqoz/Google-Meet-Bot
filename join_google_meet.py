@@ -20,6 +20,8 @@ class JoinGoogleMeet:
         self.password = os.getenv('EMAIL_PASSWORD')
         # create chrome instance
         opt = Options()
+        # PATCH: always use a unique Chrome user data dir (fixes Docker/Coolify bug)
+        opt.add_argument(f"--user-data-dir={tempfile.mkdtemp()}")
         opt.add_argument('--disable-blink-features=AutomationControlled')
         opt.add_argument('--start-maximized')
         opt.add_experimental_option("prefs", {
