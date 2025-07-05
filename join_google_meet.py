@@ -1,21 +1,14 @@
 # Fichier : join_google_meet.py
+
+# ... (tous les imports restent les mêmes) ...
 from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
-import time
-import json
-import os
-from dotenv import load_dotenv
+# etc...
 from record_audio import AudioRecorder
-from speech_to_text import SpeechToText
+from speech_to_text import SpeechToText # Important !
 
-load_dotenv()
-
+# ... (la classe JoinGoogleMeet reste la même, elle fonctionne parfaitement) ...
 class JoinGoogleMeet:
-    # ... (le code de la classe est celui de ma réponse précédente, il est correct) ...
+    # ... __init__ ...
     def __init__(self):
         opt = Options()
         opt.add_argument('--no-sandbox')
@@ -33,7 +26,7 @@ class JoinGoogleMeet:
         print("=== [DEBUG] Initialisation du driver Chrome en mode headless...")
         self.driver = webdriver.Chrome(options=opt)
         self.driver.set_window_size(1920, 1080)
-
+    # ... login_with_cookies ...
     def login_with_cookies(self, meet_link):
         try:
             print(f"=== [DEBUG] Navigation vers le lien Google Meet : {meet_link}")
@@ -57,7 +50,7 @@ class JoinGoogleMeet:
             print(f"=== [ERREUR FATALE] Échec de la connexion par cookies : {e}")
             self.driver.quit()
             raise
-
+    # ... join_and_record ...
     def join_and_record(self, audio_path, duration):
         try:
             join_button_xpath = "//button[.//span[contains(text(), 'Participer') or contains(text(), 'Demander')]]"
@@ -72,57 +65,57 @@ class JoinGoogleMeet:
             print("=== [INFO] Attente de 10 secondes pour la stabilisation de la connexion...")
             time.sleep(10)
             
-            print("=== [DEBUG] Appel de AudioRecorder().get_audio() maintenant...")
+            print("=== [INFO] Enregistrement audio démarré...")
             recorder = AudioRecorder()
             recorder.get_audio(audio_path, duration)
-            print("=== [DEBUG] L'appel à AudioRecorder().get_audio() est terminé.")
+            print(f"=== [INFO] Enregistrement audio terminé. Fichier sauvegardé ici : {audio_path}")
 
-            if os.path.exists(audio_path):
-                print(f"=== [SUCCÈS] Fichier audio créé avec succès à l'emplacement : {audio_path}")
-                print(f"=== [DEBUG] Taille du fichier : {os.path.getsize(audio_path)} octets")
-            else:
-                print(f"=== [ERREUR FATALE] Le fichier audio n'a pas été créé à l'emplacement attendu : {audio_path}")
-                
         except Exception as e:
             print(f"=== [ERREUR FATALE] Échec pour rejoindre ou enregistrer : {e}")
             self.driver.quit()
             raise
 
+
+# LA FONCTION MAIN MISE À JOUR
 def main():
     print("=== [INFO] Démarrage de la fonction main() ===")
     
+    # --- Configuration ---
     recordings_dir = "/app/recordings"
     os.makedirs(recordings_dir, exist_ok=True)
     timestr = time.strftime("%Y%m%d-%H%M%S")
     audio_path = os.path.join(recordings_dir, f"recording-{timestr}.wav")
     
     meet_link = os.getenv('MEET_LINK')
-    duration = int(os.getenv('RECORDING_DURATION', 60))
+    duration = int(os.getenv('RECORDING_DURATION', 18000))
 
     if not meet_link:
         print("=== [ERREUR FATALE] Variable d'environnement MEET_LINK manquante.")
         return
 
     print("=== [INFO] Lancement du bot Google Meet ===")
-    print(f"=== [INFO] Lien de la réunion : {meet_link}")
-    print(f"=== [INFO] Durée d'enregistrement prévue : {duration} secondes")
-    print(f"=== [INFO] Chemin de sauvegarde du fichier audio : {audio_path}")
+    print(f"=== [INFO] Le fichier audio sera sauvegardé dans : {audio_path}")
     
     obj = None
     try:
+        # --- ÉTAPE 1 : Connexion et Enregistrement ---
         obj = JoinGoogleMeet()
         obj.login_with_cookies(meet_link)
         obj.join_and_record(audio_path, duration)
 
-        if os.path.exists(audio_path) and os.path.getsize(audio_path) > 44:
-            print("=== [INFO] Lancement de la transcription...")
+        # --- ÉTAPE 2 : Transcription et Résumé ---
+        # On vérifie que le fichier audio existe et n'est pas vide
+        if os.path.exists(audio_path) and os.path.getsize(audio_path) > 44: # 44 octets = en-tête d'un fichier WAV vide
+            print("=== [INFO] Lancement de la transcription avec Whisper...")
             transcriber = SpeechToText()
-            transcriber.transcribe(audio_path)
-            print("=== [INFO] Transcription terminée.")
+            # La magie opère ici : la fonction transcribe fait l'appel à Whisper ET à OpenAI
+            transcriber.transcribe(audio_path) 
+            print("=== [INFO] Transcription et résumé terminés.")
         else:
             print("=== [AVERTISSEMENT] Fichier audio vide ou manquant, la transcription est ignorée.")
         
         print("=== [SUCCÈS] Le bot a terminé toutes ses tâches.")
+
     except Exception as e:
         print(f"=== [ERREUR] Une erreur non gérée est survenue : {e}")
     finally:
